@@ -16,8 +16,26 @@ class MLPCosine(nn.Module):
         )
     def forward(self, x): 
         X = dct.dct(x)
-        print(X)
         return self.net(X)
+    
+class MLPCosineTime(nn.Module):
+    def __init__(self, past, feature_dim, hidden=64, out_dim=2):
+        super().__init__()
+        self.past = past
+        self.feat_dim = feature_dim
+        self.net = nn.Sequential(
+            nn.Linear(past * feature_dim, hidden), nn.ReLU(),
+            nn.Linear(hidden, hidden), nn.ReLU(),
+            nn.Linear(hidden, out_dim)  # logits (no activation)
+        )
+
+    def forward(self, x : torch.Tensor):
+        # 1) UNFLATTEN
+        #x = x.view(x.shape[0], self.past, self.feat_dim)
+        x = dct.dct(x)
+        #x = x.reshape(x.shape[0], self.past * self.feat_dim)
+        # 3) FLATTEN BACK and feedforward
+        return self.net(x)
 
 class MLPFourier(nn.Module):
     def __init__(self, in_dim, hidden=64, out_dim=2):
