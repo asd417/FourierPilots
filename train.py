@@ -5,102 +5,9 @@ import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader, random_split
 import torch_dct as dct
 import matplotlib.pyplot as plt
+import os
 
-class MLPCosine(nn.Module):
-    def __init__(self, in_dim, hidden=64, out_dim=2):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, hidden), nn.ReLU(),
-            nn.Linear(hidden, hidden), nn.ReLU(),
-            nn.Linear(hidden, out_dim)  # logits (no activation)
-        )
-    def forward(self, x): 
-        X = dct.dct(x)
-        return self.net(X)
-    
-class MLPCosineTime(nn.Module):
-    def __init__(self, past, feature_dim, hidden=64, out_dim=2):
-        super().__init__()
-        self.past = past
-        self.feat_dim = feature_dim
-        self.net = nn.Sequential(
-            nn.Linear(past * feature_dim, hidden), nn.ReLU(),
-            nn.Linear(hidden, hidden), nn.ReLU(),
-            nn.Linear(hidden, out_dim)  # logits (no activation)
-        )
-
-    def forward(self, x : torch.Tensor):
-        # 1) UNFLATTEN
-        #x = x.view(x.shape[0], self.past, self.feat_dim)
-        x = dct.dct(x)
-        #x = x.reshape(x.shape[0], self.past * self.feat_dim)
-        # 3) FLATTEN BACK and feedforward
-        return self.net(x)
-
-class MLPFourier(nn.Module):
-    def __init__(self, in_dim, hidden=64, out_dim=2):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, hidden), nn.ReLU(),
-            nn.Linear(hidden, hidden), nn.ReLU(),
-            nn.Linear(hidden, out_dim)  # logits (no activation)
-        )
-    def forward(self, x): 
-        X = torch.fft.fft(x,norm="ortho")          
-        return self.net(X.real)
-    
-class MLPFourier(nn.Module):
-    def __init__(self, in_dim, hidden=64, out_dim=2):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, hidden), nn.ReLU(),
-            nn.Linear(hidden, hidden), nn.ReLU(),
-            nn.Linear(hidden, out_dim)  # logits (no activation)
-        )
-    def forward(self, x): 
-        X = torch.fft.fft(x,norm="ortho")
-        print(X.real)                
-        return self.net(X.real)
-
-class MLPFourierTime(nn.Module):
-    def __init__(self, past, feature_dim, hidden=64, out_dim=2):
-        super().__init__()
-        self.past = past
-        self.feat_dim = feature_dim
-        self.net = nn.Sequential(
-            nn.Linear(past * feature_dim, hidden), nn.ReLU(),
-            nn.Linear(hidden, hidden), nn.ReLU(),
-            nn.Linear(hidden, out_dim)  # logits (no activation)
-        )
-
-    def forward(self, x : torch.Tensor):
-        # 1) UNFLATTEN
-        x = x.view(x.shape[0], self.past, self.feat_dim)
-        x = torch.fft.fft(x,dim=1).real
-        x = x.reshape(x.shape[0], self.past * self.feat_dim)
-        # 3) FLATTEN BACK and feedforward
-        return self.net(x)
-
-class MLP(nn.Module):
-    def __init__(self, in_dim, hidden=64, out_dim=2):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, hidden), nn.ReLU(),
-            nn.Linear(hidden, hidden), nn.ReLU(),
-            nn.Linear(hidden, out_dim)  # logits (no activation)
-        )
-    def forward(self, x): return self.net(x)
-
-class MLPTime(nn.Module):
-    def __init__(self, past, features, hidden=64, out_dim=2):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(past * features, hidden), nn.ReLU(),
-            nn.Linear(hidden, hidden), nn.ReLU(),
-            nn.Linear(hidden, out_dim)  # logits (no activation)
-        )
-    def forward(self, x): return self.net(x)
-
+from models import MLPCosine, MLPDoubleCosine, MLPCosineTime, MLPDoubleCosineTime, MLPFourier, MLPFourierTime, MLPFourierTimeFlat, MLP, MLPTime
 
 def load_dataset(path: str, cut=4000, seed: int = 0):
     # whitespace-separated; supports one or many rows
@@ -230,12 +137,17 @@ def train_independent_bce(
     train_loader, val_loader, scaler = make_loaders(X, Y, batch_size=batch_size, seed=seed)
 
     models = [
-        #MLPFourier, 
-        MLPCosine, 
-        #MLP
+        MLPFourier, 
+        MLPCosine,
+        MLPDoubleCosine,
+        MLP
         ]
+    all_histories = {}
     for m in models:
         model = m(in_dim, hidden=hidden, out_dim=2).to(device)
+        model_name = m.__name__
+        val_losses = []
+        val_accs = []
         print(f"Trying model: {m.__name__}")
         #model = MLPFourier(in_dim, hidden=hidden, out_dim=2).to(device)
         #model = MLP(in_dim, hidden=hidden, out_dim=2).to(device)
@@ -273,9 +185,16 @@ def train_independent_bce(
                 print(f"Epoch {ep:3d}  val_loss: {eval_loss(val_loader):.4f} accuracy: {acc:.4f}")
                 final_val = eval_loss(val_loader)
                 final_acc = acc
+                val_losses.append(final_val)
+                val_accs.append(acc)
 
         model.eval()
         print(f"Finished training model: {m.__name__} with val_loss: {final_val:.4f} accuracy: {final_acc:.4f}")
+        all_histories[model_name] = {
+            "val_loss": val_losses,
+            "acc": val_accs,
+        }
+    return all_histories
 
 def train_timed_bce(
     path: str,
@@ -299,8 +218,11 @@ def train_timed_bce(
     train_loader, val_loader, scaler = make_loaders(X, Y, batch_size=batch_size, seed=seed)
 
     models = [
+        MLPCosineTime,
+        MLPDoubleCosineTime,
         MLPFourierTime,
-        MLPTime
+        MLPFourierTimeFlat,
+        MLPTime 
         ]
     
     all_histories = {}
@@ -395,9 +317,13 @@ def validate_dataset_generation():
 #validate_dataset_generation()
 #train_independent_bce("out_lines.log", epochs=1, hidden=64, lr=1e-3)
 #train_timed_bce("out_data_id0.log", epochs=10, hidden=10, lr=1e-2, blocks=100)
+import itertools
+import numpy as np
+import matplotlib.pyplot as plt
 
-def sweep_timed_bce(path: str, plt_path="./"):
-    
+
+def sweep_independent_bce(path: str, plt_path:str = "./", epochs: int = 10, n_repeats: int = 5):
+    import json
     # Search space
     hidden_sizes = [8, 16, 32, 64]
     lrs          = [1e-3, 3e-3, 1e-2]
@@ -408,39 +334,180 @@ def sweep_timed_bce(path: str, plt_path="./"):
     for hidden, lr, blocks, batch_size in itertools.product(
         hidden_sizes, lrs, blocks_list, batch_sizes
     ):
+        
         cfg_id += 1
-        print(f"\n=== Config: hidden={hidden}, lr={lr}, blocks={blocks}, batch_size={batch_size} ===")
-
-        histories = train_timed_bce(
-            path,
-            epochs=10,          # keep small for sweep
-            hidden=hidden,
-            lr=lr,
-            blocks=blocks,
-            # LOW CONFIDENCE: only if your function accepts batch_size/seed/device
-            batch_size=batch_size,
-            seed=0,
+        print(f"\n=== Config #{cfg_id}: hidden={hidden}, lr={lr}, blocks={blocks}, batch_size={batch_size} ===")
+        fname_dict = (
+            f"{plt_path}"
+            f"data/"
+            f"independent_bce_cfg{cfg_id}_h{hidden}_lr{lr}_b{blocks}_"
+            f"bs{batch_size}_rep{n_repeats}.json"
         )
+        fname_plot = (
+            f"{plt_path}"
+            f"independent_bce_cfg{cfg_id}_h{hidden}_lr{lr}_b{blocks}_"
+            f"bs{batch_size}_rep{n_repeats}.png"
+        )
+        if (os.path.exists(fname_dict) and os.path.exists(fname_plot)):
+            print("File exists, skipping...")
+            continue  # skip existing
+
+        # Run the same config multiple times with different seeds
+        histories_runs = []  # list of histories dicts (one per repeat)
+
+        for rep in range(n_repeats):
+            seed = rep  # you can shift by a base seed if you want
+            print(f"  -> Repeat {rep+1}/{n_repeats} (seed={seed})")
+
+            histories = train_independent_bce(
+                path,
+                epochs=epochs,
+                hidden=hidden,
+                lr=lr,
+                batch_size=batch_size,
+                seed=seed,
+            )
+            histories_runs.append(histories)
+
         # ------------------------------------------------
-        # Plot ALL models for THIS config (accuracy)
+        # Average histories over repeats for this config
+        # ------------------------------------------------
+        # Assume same models and same epoch length for all runs
+        model_names = list(histories_runs[0].keys())
+        avg_histories = {}  # model_name -> {"val_acc": [...], "val_loss": [...]}
+
+        for model_name in model_names:
+            # shape: (n_repeats, epochs)
+            acc_stack = np.stack(
+                [run[model_name]["acc"] for run in histories_runs],
+                axis=0
+            )
+            loss_stack = np.stack(
+                [run[model_name]["val_loss"] for run in histories_runs],
+                axis=0
+            )
+
+            avg_histories[model_name] = {
+                "acc": acc_stack.mean(axis=0).tolist(),
+                "val_loss": loss_stack.mean(axis=0).tolist(),
+            }
+        with open(fname_dict, "w") as f:
+            json.dump(avg_histories, f, indent=4)
+        # ------------------------------------------------
+        # Plot ALL models for THIS config (averaged accuracy)
         # ------------------------------------------------
         plt.figure(figsize=(7, 4))
-        for model_name, h in histories.items():
+        for model_name, h in avg_histories.items():
             acc = h["acc"]
             plt.plot(acc, label=model_name)
 
         plt.xlabel("Epoch")
-        plt.ylabel("Accuracy")
-        plt.title(f"Config #{cfg_id}  h={hidden}, lr={lr}, blocks={blocks}, bs={batch_size}")
+        plt.ylabel("Validation accuracy (mean over repeats)")
+        plt.title(
+            f"Config #{cfg_id}  h={hidden}, lr={lr}, blocks={blocks}, "
+            f"bs={batch_size}, repeats={n_repeats}"
+        )
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
 
-        # save one PNG per config (so we don’t pop up 10^n windows)
-        fname = f"{plt_path}timed_bce_cfg{cfg_id}_h{hidden}_lr{lr}_b{blocks}_bs{batch_size}.png"
-        plt.savefig(fname)
+        plt.savefig(fname_plot)
         plt.close()
-        print(f"Saved plot to {fname}")
+        print(f"Saved averaged accuracy plot to {fname_plot}")
 
+def sweep_timed_bce(path: str, plt_path:str = "./", epochs: int = 10, n_repeats: int = 5):
+    import json
+    # Search space
+    hidden_sizes = [8, 16, 32, 64]
+    lrs          = [1e-3, 3e-3, 1e-2]
+    blocks_list  = [25, 50, 100, 200]
+    batch_sizes  = [32, 64, 128]
 
-sweep_timed_bce("out_data_id0.log", plt_path="plots/")
+    cfg_id = 0
+    for hidden, lr, blocks, batch_size in itertools.product(
+        hidden_sizes, lrs, blocks_list, batch_sizes
+    ):
+        
+        cfg_id += 1
+        print(f"\n=== Config #{cfg_id}: hidden={hidden}, lr={lr}, blocks={blocks}, batch_size={batch_size} ===")
+        fname_dict = (
+            f"{plt_path}"
+            f"data/"
+            f"timed_bce_cfg{cfg_id}_h{hidden}_lr{lr}_b{blocks}_"
+            f"bs{batch_size}_rep{n_repeats}.json"
+        )
+        fname_plot = (
+            f"{plt_path}"
+            f"timed_bce_cfg{cfg_id}_h{hidden}_lr{lr}_b{blocks}_"
+            f"bs{batch_size}_rep{n_repeats}.png"
+        )
+        if (os.path.exists(fname_dict) and os.path.exists(fname_plot)):
+            print("File exists, skipping...")
+            continue  # skip existing
+
+        # Run the same config multiple times with different seeds
+        histories_runs = []  # list of histories dicts (one per repeat)
+
+        for rep in range(n_repeats):
+            seed = rep  # you can shift by a base seed if you want
+            print(f"  -> Repeat {rep+1}/{n_repeats} (seed={seed})")
+
+            histories = train_timed_bce(
+                path,
+                epochs=epochs,
+                hidden=hidden,
+                lr=lr,
+                blocks=blocks,
+                batch_size=batch_size,
+                seed=seed,
+            )
+            histories_runs.append(histories)
+
+        # ------------------------------------------------
+        # Average histories over repeats for this config
+        # ------------------------------------------------
+        # Assume same models and same epoch length for all runs
+        model_names = list(histories_runs[0].keys())
+        avg_histories = {}  # model_name -> {"val_acc": [...], "val_loss": [...]}
+
+        for model_name in model_names:
+            # shape: (n_repeats, epochs)
+            acc_stack = np.stack(
+                [run[model_name]["acc"] for run in histories_runs],
+                axis=0
+            )
+            loss_stack = np.stack(
+                [run[model_name]["val_loss"] for run in histories_runs],
+                axis=0
+            )
+
+            avg_histories[model_name] = {
+                "acc": acc_stack.mean(axis=0).tolist(),
+                "val_loss": loss_stack.mean(axis=0).tolist(),
+            }
+        with open(fname_dict, "w") as f:
+            json.dump(avg_histories, f, indent=4)
+        # ------------------------------------------------
+        # Plot ALL models for THIS config (averaged accuracy)
+        # ------------------------------------------------
+        plt.figure(figsize=(7, 4))
+        for model_name, h in avg_histories.items():
+            acc = h["acc"]
+            plt.plot(acc, label=model_name)
+
+        plt.xlabel("Epoch")
+        plt.ylabel("Validation accuracy (mean over repeats)")
+        plt.title(
+            f"Config #{cfg_id}  h={hidden}, lr={lr}, blocks={blocks}, "
+            f"bs={batch_size}, repeats={n_repeats}"
+        )
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+
+        plt.savefig(fname_plot)
+        plt.close()
+        print(f"Saved averaged accuracy plot to {fname_plot}")
+
+sweep_timed_bce("out_data_id0.log", plt_path="plots_timed/")
+sweep_independent_bce("out_lines.log", plt_path="plots_independent/")

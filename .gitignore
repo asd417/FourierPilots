@@ -1,3 +1,6 @@
 venv
 *.log
 plots/
+plots_timed/
+plots_independent/
+__pycache__/
