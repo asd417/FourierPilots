@@ -143,6 +143,41 @@ def hidden_layer_trend(data, path):
     plt.savefig(f"{path}/val_loss_vs_lr.png")
     plt.close()
 
+    plt.figure(figsize=(9, 5))
+
+    for model, h_dict in data.items():
+        hs = sorted(h_dict["b"].keys())
+        final_acc = [np.mean(h_dict["b"][lr]["acc"]) for lr in hs]
+        plt.plot(hs, final_acc, marker="o", label=model)
+
+    plt.title("Final Accuracy vs Data Size")
+    plt.xlabel("Data Size")
+    plt.ylabel("Final Accuracy")
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(f"{path}/acc_vs_b.png")
+    plt.close()
+
+    # --------------------------
+    # Final Validation Loss (all models)
+    # --------------------------
+    plt.figure(figsize=(9, 5))
+
+    for model, h_dict in data.items():
+        hs = sorted(h_dict["b"].keys())
+        final_loss = [np.mean(h_dict["b"][lr]["val_loss"]) for lr in hs]
+        plt.plot(hs, final_loss, marker="o", label=model)
+
+    plt.title("Final Validation Loss vs Data Size")
+    plt.xlabel("Data Size")
+    plt.ylabel("Final Val Loss")
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(f"{path}/val_loss_vs_b.png")
+    plt.close()
+
     print("Saved combined trend plots.")
 
 def average_time_series_overall(directory):

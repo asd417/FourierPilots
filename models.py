@@ -38,11 +38,7 @@ class MLPCosineTime(nn.Module):
         )
 
     def forward(self, x : torch.Tensor):
-        # 1) UNFLATTEN
-        #x = x.view(x.shape[0], self.past, self.feat_dim)
-        x = dct.dct(x)
-        #x = x.reshape(x.shape[0], self.past * self.feat_dim)
-        # 3) FLATTEN BACK and feedforward
+        x = dct.dct(x) # DCT performs on last axis by default
         return self.net(x)
 
 class MLPDoubleCosineTime(nn.Module):
